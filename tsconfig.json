@@ -1,0 +1,23 @@
+
+{
+  "compilerOptions": {
+      "allowSyntheticDefaultImports": true,
+      "lib": [
+          "dom",
+          "es2015",
+          "scripthost"
+      ],
+      "module": "commonjs",
+      "noUnusedLocals": false,
+      "outDir": "dist",
+      "strict": false,
+      "target": "es5",
+      "checkJs": false,
+      "keyofStringsOnly": false
+  },
+  "compileOnSave": true,
+  "exclude": [
+      "node_modules",
+      "packages"
+  ]
+}

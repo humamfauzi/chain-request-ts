@@ -1,0 +1,8 @@
+*.swp
+*.swo
+dist/*.js
+node_modules
+*.log
+
+
+

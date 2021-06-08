@@ -1,0 +1,17 @@
+{
+  "name": "chain-request",
+  "version": "0.0.1",
+  "description": "Automatic reqeust seqeuence",
+  "main": "index.js",
+  "scripts": {
+    "test": "npm run test"
+  },
+  "keywords": [
+    "request"
+  ],
+  "author": "Humam Fauzi",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^0.21.1"
+  }
+}
