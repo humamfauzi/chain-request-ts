@@ -8,9 +8,9 @@ import {
 } from './types'
 
 import * as axios from 'axios'
+import { v4 as uuidv4 } from 'uuid'
 
 // TODO: Create a check whether there is a cicular request
-// TODO: Set a unique id each time the Request Class initiated
 
 export class RequestClass {
 	readonly requestId: string
@@ -42,9 +42,10 @@ export class RequestClass {
 		this.prevRequests = []
 
 		this.isCompleted = false
+		this.requestId = this.generateRequestId()
 	}
 
-	public setAssertion(assertion :Assertion) {
+	public addAssertion(assertion :Assertion) {
 		this.assertions.push(assertion)	
 	}
 
@@ -74,7 +75,6 @@ export class RequestClass {
 		return
 	}
 
-
 	public isAllPreviousRequestDone() :boolean {
 		for (const prevRequest of this.prevRequests) {
 			if (!prevRequest.isComplete()) {
@@ -84,7 +84,7 @@ export class RequestClass {
 		return true
 	}
 
-	private getRequest() :Request {
+	public getRequest() :Request {
 		return {
 			method: this.method,
 			host: this.host, 
@@ -93,6 +93,25 @@ export class RequestClass {
 			query: this.query,
 			headers: this.headers,
 		}	
+	}
+	public getRequestId() :string {
+		return this.requestId	
+	}
+
+	public getPreviousRequestId() :string[] {
+		return this.prevRequests.map(pr => {
+			return pr.getRequestId()
+		})
+	}
+
+	public getNextRequestId() :string[] {
+		return this.nextRequests.map(nr => {
+			return nr.getRequestId()
+		})
+	}
+
+	private generateRequestId() :string {
+		return uuidv4()
 	}
 
 	private isComplete() :boolean {
@@ -118,16 +137,13 @@ export class RequestClass {
 		this.requestReport = this.generateRequestReport(result)	
 	}
 
-	public getRequestId() :string {
-		return this.requestId	
-	}
 		
 	private generateRequestReport(result :Response) :RequestReport {
 		const request = this.getRequest()
 		const requestReport: RequestReport = {
 			success: false,
 			time: new Date(),
-			request_id: this.requestId,
+			request_id: this.getRequestId(),
 			request,
 			response: result,
 			previous_request_id: this.prevRequests.map(pr => {
