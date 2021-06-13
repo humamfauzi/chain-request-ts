@@ -1,19 +1,25 @@
 import { 
-  IFormation,
 	RequestMethod,
 	RequestReport,
 	Request,
 	StatusCode,
-	Response
+	Response,
+
+	IAssertion,
+  IFormation,
+	IRequestEngine
 } from './types'
 
-import * as axios from 'axios'
+import {
+	AxiosWrapper
+} from './backend'
+
+import { assert } from 'chai'
 import { v4 as uuidv4 } from 'uuid'
 
 // TODO: Create a check whether there is a cicular request
 
 export class RequestClass {
-	readonly requestId: string
 	method: RequestMethod
 	host: string
 	path: string
@@ -22,13 +28,16 @@ export class RequestClass {
 	query: IFormation
 	headers: IFormation
 
-	assertions: Assertion[]
+	assertions: IAssertion[]
 
 	prevRequests: RequestClass[]
 	nextRequests: RequestClass[]
 
 	isCompleted: boolean
 	requestReport: RequestReport
+	
+	readonly requestBackend: IRequestEngine
+	readonly requestId: string
 
 	constructor(request :Request) {
 	
@@ -37,15 +46,18 @@ export class RequestClass {
 		this.path = request.path
 		this.query = request.query
 		this.headers = request.headers
+		this.payloads = [ request.payload ]
 
 		this.nextRequests = []
 		this.prevRequests = []
 
 		this.isCompleted = false
 		this.requestId = this.generateRequestId()
+
+		this.requestBackend = new AxiosWrapper()
 	}
 
-	public addAssertion(assertion :Assertion) {
+	public addAssertion<T>(assertion :Assertion<T>) {
 		this.assertions.push(assertion)	
 	}
 
@@ -132,19 +144,17 @@ export class RequestClass {
 	private runAssertions(result :Response) {
 		this.completeRequest()
 		for (const assertion of this.assertions) {
-	
+			assertion.compareValueFromResult(result)
 		}
 		this.requestReport = this.generateRequestReport(result)	
 	}
-
 		
 	private generateRequestReport(result :Response) :RequestReport {
-		const request = this.getRequest()
 		const requestReport: RequestReport = {
 			success: false,
 			time: new Date(),
 			request_id: this.getRequestId(),
-			request,
+			request: this.getRequest(),
 			response: result,
 			previous_request_id: this.prevRequests.map(pr => {
 				return pr.getRequestId()	
@@ -157,29 +167,85 @@ export class RequestClass {
 	}
 }
 
-export class Assertion {
-	referenceValue: any
-	checkValuePath: string
+export class Assertion<T> implements IAssertion {
+	referenceValue: T
+	finderFunction: (result: any) => T
 	comparison: string
-	constructor() {}
+	isBreaking: boolean
+	isWarning: boolean
+	report: string
+
+	constructor(isBreaking: boolean) {
+		this.isBreaking = isBreaking	
+		this.report = "empty"
+	}
+
+	public setReferenceValue(referenceValue: T) :void {
+		this.referenceValue = referenceValue
+	}
+
+	public setWarningLog(isWarning: boolean) :void {
+		this.isWarning = isWarning
+	}
+	public setComparison(comparison: string) :void {
+		this.comparison = comparison
+	}
+
+	public setFinderFunction(fn: (result: any) => T) {
+		this.finderFunction = fn	
+	}
+	public compareValueFromResult(result: any) {
+		const actualValue = this.finderFunction(result)
+		return this.compare(actualValue)
+	}
+
+	@Assertion.catchDecorator
+	public compare(actualValue: T) :void {
+		this.report = `${actualValue} ${this.comparison} ${this.referenceValue}`
+		assert[this.comparison](actualValue, this.referenceValue)
+	}
+
+	@Assertion.catchDecorator
+	public directCompare(actualValue: T, comparison: string, refValue: T) :void {
+		this.report = `${actualValue} ${comparison} ${refValue}`
+		assert[comparison](actualValue, refValue)
+	}
+	public getReport() :string {
+		return this.report
+	}
+
+	private static catchDecorator(target: any, propertyKey: string, descriptor: any) {
+		const original = descriptor.value
+		descriptor.value = function( ... args: any[]) {
+			try {
+				const result = original.apply(this, args)
+			} catch(e) {
+				if (this.isBreaking) {
+					throw new Error(e)
+				}	else if (this.isWarning) {
+					console.log("Assertion fail", this.report)		
+				}
+			}
+		}
+	}
 }
 
 export abstract class Formation implements IFormation {
 	objectForm: object
 	stringForm: string
 
-	constructor(baseQuery :string | object) {
-		this.initQueryString(baseQuery)
+	constructor(baseFormation :string | object) {
+		this.initFormation(baseFormation)
 	}
 
-	private initQueryString(baseQuery :string | object) {
-		switch (typeof baseQuery) {
+	private initFormation(baseFormation :string | object) {
+		switch (typeof baseFormation) {
 			case 'string':
-				return this.initStringBased(baseQuery)
+				return this.initStringBased(baseFormation)
 			case 'object':
-				return this.initObjectBased(baseQuery)
+				return this.initObjectBased(baseFormation)
 			default:
-				throw new Error("Cannot init Query String")
+				throw new Error("Cannot init Formation")
 		}
 	}
 
@@ -205,29 +271,36 @@ export abstract class Formation implements IFormation {
 }
 
 export class QueryString extends Formation {
+	queryString :URLSearchParams
 	constructor(base :string | object) {
 		super(base)
 	}
-
-	protected convertToObject(baseQuery :string) :object {
-		return {}
+	protected convertToObject(baseFormation :string) :object {
+		const qs = new URLSearchParams(baseFormation)	
+		const newObject = {}
+		for (const [key, value] of qs) {
+			newObject[key] = value
+		}
+		return newObject
 	}
-	
-	protected convertToString(baseQuery: object) :string {
-		return ''
+	protected convertToString(baseFormation: object) :string {
+		const newObj :Record<string, string> = {}
+		for (const [key, value] of Object.entries(baseFormation)) {
+			newObj['' + key] = '' + value
+		}
+		const qs = new URLSearchParams(newObj)
+		return qs.toString()
 	}
-
 	public toJSON() :object {
-		return {}	
+		return this.objectForm
 	}
                           
 	public toString() :string{
-		return ''	
+		return this.stringForm	
 	}
 
-                          
 	public listKeys() :string[]{
-		return ['']	
+		return Object.keys(this.objectForm)	
 	}
 }
 
@@ -237,22 +310,34 @@ export class Header extends Formation {
 	}
 
 	protected convertToObject(baseQuery :string) :object {
-		return {}
+		const splitted = baseQuery.split("\n")
+		const newObject = {}
+		for (const s of splitted) {
+			if (s.includes(": ")) {
+				const [key, value] = s.split(": ")	
+				newObject[key] = value.trim()
+			}
+		}
+		return newObject
 	}
 	
-	protected convertToString(baseQuery: object) :string {
-		return ''
+	protected convertToString(baseFormation: object) :string {
+		let finalString :string = ''
+		for(const [key, value] of Object.entries(baseFormation)) {
+			finalString += `${key}: ${value}\n`	
+		}
+		return finalString.slice(0, finalString.length -1)
 	}
 
 	public toJSON() :object {
-		return {}	
+		return this.objectForm
 	}
                           
 	public toString() :string{
-		return ''	
+		return this.stringForm	
 	}
 
 	public listKeys() :string[]{
-		return ['']	
+		return Object.keys(this.objectForm)	
 	}
 }

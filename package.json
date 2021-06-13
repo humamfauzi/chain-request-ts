@@ -4,9 +4,9 @@
   "description": "Automatic reqeust seqeuence",
   "main": "index.js",
   "scripts": {
-    "test": "npx jest",
+    "test": "npx jest test/*",
     "build": "./node_modules/typescript/bin/tsc",
-		"bt": "npm run build; npm run test"
+    "bt": "npm run build; npm run test"
   },
   "keywords": [
     "request"
@@ -14,7 +14,9 @@
   "author": "Humam Fauzi",
   "license": "MIT",
   "dependencies": {
+    "@types/chai": "^4.2.18",
     "axios": "^0.21.1",
+    "chai": "^4.3.4",
     "uuid": "^8.3.2"
   },
   "devDependencies": {

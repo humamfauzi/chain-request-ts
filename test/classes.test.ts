@@ -1,7 +1,8 @@
-import { RequestClass,
+import { 
+	RequestClass,
 	Assertion,
-	QueryString,
 	Header,
+	QueryString
 } from '../src/classes'
 
 import {
@@ -40,8 +41,19 @@ describe('Request Class', () => {
 		expect(request.getPreviousRequestId()[0]).toBe(prevRequest.getRequestId())
 	});
 
-	it('should return request detail', () => {})
-	it('should run request and fail assertions', () => {})
+	it('should return request detail', () => {
+		const request = new RequestClass(baseRequestProfile)
+		const requestDetail = request.getRequest()
+		Object.assign(baseRequestProfile, { payload: [ {} ] })
+		expect(requestDetail).toStrictEqual(baseRequestProfile)	
+	});
+
+	it('should run request and fail assertions', () => {
+		const request = new RequestClass(baseRequestProfile)
+		const assertion = new Assertion<string>(false)
+		return;
+	});
+
 	it('should run request and pass assertions', () => {})
 	it('should not work when previous request does not pass assertion', () => {})
 	it('should take all payload from previous payload', () => {})
@@ -53,22 +65,89 @@ describe('Request Class', () => {
 })
 
 describe('Assertion Class', () => {
-	it('should pass basic comparison =, <, >', () => {})
-	it('should take input and pick relevant value', () => {}) 
-})
+	it('success assertion', () => {
+		const assertion = new Assertion<number>(false);	
+		expect(assertion.getReport()).toEqual("empty")
+		assertion.directCompare(1, 'equal', 1);
+		expect(assertion.getReport()).toEqual("1 equal 1")
+	})
 
-describe('Query Formation Class', () => {
-	it('should instantiate with string', () => {})
-	it('should instantiate with object', () => {})
-	it('should get string form of query', () => {})
-	it('should get object form of query', () => {})
-	it('should list all keys contained in query', () => {})
+	it('failed assertion without throw', () => {
+		const assertion = new Assertion<string>(false);
+		expect(assertion.getReport()).toEqual("empty")
+		assertion.directCompare("asd", 'equal', "asdd");
+		expect(assertion.getReport()).toEqual("asd equal asdd")
+	})
+
+	it('failed assertion with throw', () => {
+		const assertion = new Assertion<string>(true);
+		expect(assertion.getReport()).toEqual("empty")
+		const exampleFn = () => {
+			return assertion.directCompare("asd", 'equal', "asdd")
+		}
+		expect(exampleFn).toThrow(Error)
+		expect(assertion.getReport()).toEqual("asd equal asdd")
+	})
+
+	it('use finder function', () => {
+		const resultValue = {
+			key_one: {
+				key_two: "value"	
+			}
+		}
+		const findValue = function(result) {
+			return result?.key_one?.key_two	
+		}
+		const assertion = new Assertion<string>(false)
+		assertion.setFinderFunction(findValue)
+		assertion.setComparison('equal')
+		assertion.setReferenceValue("value")
+		const exampleFn = () => {
+			return assertion.compareValueFromResult(resultValue)		
+		}
+		expect(exampleFn).not.toThrow(Error)
+		expect(assertion.getReport()).toEqual("value equal value")
+	})
+	it('should use warning', () => {
+		const assertion = new Assertion<string>(false)
+		assertion.setWarningLog(true)
+		const exampleFn = () => {
+			return assertion.directCompare("asd", "equal", "asdd")	
+		}	
+		const mockFn = jest.spyOn(console, 'log')
+		expect(exampleFn).not.toThrow(Error)
+		expect(mockFn.mock.calls.length).toBe(1)	
+	})
 })
 
 describe('Header Formation Class', () => {
-	it('should instantiate with string', () => {})
-	it('should instantiate with object', () => {})
-	it('should get string form of header', () => {})
-	it('should get object form of header', () => {})
-	it('should list all keys contained in header', () => {})
+	it('should instantiate with string', () => {
+		const stringForm = `Content-Type: application/json\nAuthentication: Basic asd123
+		`
+		const header = new Header(stringForm)
+		const objectForm = header.toJSON()
+		expect(objectForm["Content-Type"]).toBe("application/json")
+	})
+	it('should instantiate with object', () => {
+		const objectForm = {
+			"Content-Type": "application/json",
+			"Authentication": "Basic asd123",
+		}
+		const header = new Header(objectForm)
+		const stringForm = header.toString()
+		console.log(stringForm)
+		expect(stringForm).toEqual("Content-Type: application/json\nAuthentication: Basic asd123")
+	
+	})
+	it('should list all keys contained in header', () => {
+		const objectForm = {
+			"Content-Type": "application/json",
+			"Authentication": "Basic asd123",
+		}
+		const header = new Header(objectForm)
+		expect(header.listKeys()).toEqual([
+			"Content-Type",
+			"Authentication"	
+		])	
+	})
 })

@@ -45,3 +45,11 @@ export enum StatusCode {
 	OK = 200,
 	NOT_FOUND = 404,
 }
+
+export interface IAssertion {
+	compareValueFromResult(result: any)
+}
+
+export interface IRequestEngine {
+	request() :Promise<void>
+}
