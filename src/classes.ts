@@ -7,7 +7,11 @@ import {
 
 	IAssertion,
   IFormation,
-	IRequestEngine
+	IRequestEngine,
+	ICircularCheck,
+	ISequence,
+	AssertionLevel,
+	AssertionReport,
 } from './types'
 
 import {
@@ -18,8 +22,49 @@ import { assert } from 'chai'
 import { v4 as uuidv4 } from 'uuid'
 
 // TODO: Create a check whether there is a cicular request
+export class CircularCheck implements ICircularCheck {
+	start: ISequence
+	checked: string[]
+	constructor(startingPoint :ISequence) {
+		this.start = startingPoint	
+		this.checked = []
+	}
 
-export class RequestClass {
+	public check() :boolean {
+		return this.recursiveCheck(this.start)
+	}
+
+	private recursiveCheck(point :ISequence) :boolean {
+		const nextSequences = point.getNext()
+		if (nextSequences.length == 0) {
+			return false	
+		}
+		const nextSequenceIds = nextSequences.map(ns => {
+			return ns.getId()	
+		})
+
+		if (this.isAlreadyExist(nextSequenceIds)) {
+			return true	
+		}
+		this.checked.push(...nextSequenceIds)
+		return this.someTrue(nextSequences.map(ns => this.recursiveCheck(ns)))
+	}
+
+	private someTrue(boolArr :boolean[]) :boolean {
+		return boolArr.includes(true)	
+	}
+
+	private isAlreadyExist(nextSequenceIds :string[]) :boolean {
+		for (const nsi of nextSequenceIds) {
+			if (this.checked.includes(nsi)) {
+				return true
+			}
+		}
+		return false
+	}
+}
+
+export class RequestClass implements ISequence {
 	method: RequestMethod
 	host: string
 	path: string
@@ -29,6 +74,7 @@ export class RequestClass {
 	headers: IFormation
 
 	assertions: IAssertion[]
+	payloadFunction: (obj: any[]) => any
 
 	prevRequests: RequestClass[]
 	nextRequests: RequestClass[]
@@ -38,6 +84,7 @@ export class RequestClass {
 	
 	readonly requestBackend: IRequestEngine
 	readonly requestId: string
+	readonly circularChecker: ICircularCheck
 
 	constructor(request :Request) {
 	
@@ -51,10 +98,17 @@ export class RequestClass {
 		this.nextRequests = []
 		this.prevRequests = []
 
+		this.assertions = []
+
+		this.payloadFunction = function(obj: any[]) {
+			return obj[0]
+		}
+
 		this.isCompleted = false
 		this.requestId = this.generateRequestId()
 
 		this.requestBackend = new AxiosWrapper()
+		this.circularChecker = new CircularCheck(this)
 	}
 
 	public addAssertion<T>(assertion :Assertion<T>) {
@@ -74,26 +128,33 @@ export class RequestClass {
 		this.payloads.push(payload)
 	}
 
+	public setPayloadFunction(fn: (obj :any[]) => any) {
+		this.payloadFunction = fn
+	}
+
+	public checkCircularRequest() :boolean {
+		return this.circularChecker.check()
+	}
+
 	public async runRequestAndAssertions() {
-		const result = this.runRequest()
-		this.runAssertions(result)
-		const { code, reply } = result
-		for (const nextRequest of this.nextRequests) {
-			nextRequest.addPayload(reply)
-			if (nextRequest.isAllPreviousRequestDone()) {
-				await nextRequest.runRequestAndAssertions()
-			}
-		}
-		return
+		this.setPayloadUsingFunction()
+		const result = await this.runRequest(this.getRequest())
+		this.requestReport = this.runAssertions(result)
+		const { reply } = result
+		return this.runNextRequests(reply, this.requestReport)
 	}
 
 	public isAllPreviousRequestDone() :boolean {
 		for (const prevRequest of this.prevRequests) {
-			if (!prevRequest.isComplete()) {
+			if (!(prevRequest.isComplete() && prevRequest.isOK())) {
 				return false
 			}
 		}	
 		return true
+	}
+
+	public isOK() :boolean {
+		return this.requestReport.success
 	}
 
 	public getRequest() :Request {
@@ -101,130 +162,158 @@ export class RequestClass {
 			method: this.method,
 			host: this.host, 
 			path: this.path,
-			payload: this.payloads,
+			payload: this.payloads[0],
 			query: this.query,
 			headers: this.headers,
 		}	
 	}
-	public getRequestId() :string {
+
+	public getReport() :RequestReport {
+		return this.requestReport
+	}
+	
+	public getId() :string {
 		return this.requestId	
 	}
 
-	public getPreviousRequestId() :string[] {
-		return this.prevRequests.map(pr => {
-			return pr.getRequestId()
-		})
+	public getPrevious() :RequestClass[] {
+		return this.prevRequests
 	}
 
-	public getNextRequestId() :string[] {
-		return this.nextRequests.map(nr => {
-			return nr.getRequestId()
-		})
+	public getNext() :RequestClass[] {
+		return this.nextRequests
+	}
+
+	public isComplete() :boolean {
+		return this.isCompleted	
+	}
+
+	private setPayloadUsingFunction() {
+		this.payloads = [ this.payloadFunction(this.payloads) ]
 	}
 
 	private generateRequestId() :string {
 		return uuidv4()
 	}
 
-	private isComplete() :boolean {
-		return this.isCompleted	
-	}
-
 	private completeRequest() :void {
 		this.isCompleted = true	
 	}
 
-	private runRequest() :Response {
-		return {
-			code: StatusCode.OK,
-			reply: {}	
-		}	
+	private async runRequest(req :Request) :Promise<Response> {
+		return this.requestBackend.request(req)
 	}
 
-	private runAssertions(result :Response) {
+	private runAssertions(result :Response) :RequestReport {
 		this.completeRequest()
+		const assertionReports = []
 		for (const assertion of this.assertions) {
-			assertion.compareValueFromResult(result)
+			assertionReports.push(assertion.compareValueFromResult(result))
 		}
-		this.requestReport = this.generateRequestReport(result)	
+		return this.generateRequestReport(result, assertionReports)
+	}
+
+	private runNextRequests(res: Response, reqReport :RequestReport) {
+		if (!reqReport.success) {
+			return;
+		}
+		let promises = []
+		for (const nextRequest of this.nextRequests) {
+			nextRequest.addPayload(res)
+			if (nextRequest.isAllPreviousRequestDone()) {
+				promises.push(nextRequest.runRequestAndAssertions())
+			}
+		}
+		return Promise.all(promises)
 	}
 		
-	private generateRequestReport(result :Response) :RequestReport {
+	private generateRequestReport(result :Response, assertionReports :AssertionReport[]) :RequestReport {
 		const requestReport: RequestReport = {
-			success: false,
+			success: this.compareAllAssertionReports(assertionReports),
 			time: new Date(),
-			request_id: this.getRequestId(),
+			request_id: this.getId(),
 			request: this.getRequest(),
 			response: result,
 			previous_request_id: this.prevRequests.map(pr => {
-				return pr.getRequestId()	
+				return pr.getId()	
 			}),
 			next_request_id: this.nextRequests.map(nr => {
-				return nr.getRequestId()
-			})
+				return nr.getId()
+			}),
+			assertion_reports: assertionReports
 		}
 		return requestReport
+	}
+
+	private compareAllAssertionReports(assertionReports: AssertionReport[]) :boolean {
+		for (const ar of assertionReports) {
+			if (!ar.success) {
+				return false
+			}
+		}
+		return true
 	}
 }
 
 export class Assertion<T> implements IAssertion {
 	referenceValue: T
-	finderFunction: (result: any) => T
+	finderFunction: (result: Response) => T
 	comparison: string
-	isBreaking: boolean
-	isWarning: boolean
-	report: string
+	report: AssertionReport
+	assertionLevel: AssertionLevel
 
-	constructor(isBreaking: boolean) {
-		this.isBreaking = isBreaking	
-		this.report = "empty"
+	constructor(assertionLevel :AssertionLevel) {
+		this.assertionLevel = assertionLevel
+		this.report = {
+			assertionLevel: assertionLevel,
+			comparison: "empty",
+		}	
 	}
 
 	public setReferenceValue(referenceValue: T) :void {
 		this.referenceValue = referenceValue
 	}
 
-	public setWarningLog(isWarning: boolean) :void {
-		this.isWarning = isWarning
-	}
 	public setComparison(comparison: string) :void {
 		this.comparison = comparison
 	}
 
-	public setFinderFunction(fn: (result: any) => T) {
+	public setFinderFunction(fn: (result: Response) => T) {
 		this.finderFunction = fn	
 	}
-	public compareValueFromResult(result: any) {
+
+	public compareValueFromResult(result: Response) :AssertionReport {
 		const actualValue = this.finderFunction(result)
 		return this.compare(actualValue)
 	}
 
-	@Assertion.catchDecorator
-	public compare(actualValue: T) :void {
-		this.report = `${actualValue} ${this.comparison} ${this.referenceValue}`
-		assert[this.comparison](actualValue, this.referenceValue)
+	public compare(actualValue: T) :AssertionReport {
+		return this.assertion(actualValue, this.comparison, this.referenceValue)
 	}
 
-	@Assertion.catchDecorator
-	public directCompare(actualValue: T, comparison: string, refValue: T) :void {
-		this.report = `${actualValue} ${comparison} ${refValue}`
-		assert[comparison](actualValue, refValue)
+	public directCompare(actualValue: T, comparison: string, refValue: T) :AssertionReport {
+		return this.assertion(actualValue, comparison, refValue)
 	}
-	public getReport() :string {
+
+	public getReport() :AssertionReport {
 		return this.report
 	}
 
-	private static catchDecorator(target: any, propertyKey: string, descriptor: any) {
-		const original = descriptor.value
-		descriptor.value = function( ... args: any[]) {
-			try {
-				const result = original.apply(this, args)
-			} catch(e) {
-				if (this.isBreaking) {
-					throw new Error(e)
-				}	else if (this.isWarning) {
-					console.log("Assertion fail", this.report)		
-				}
+	private assertion(actualValue: T, comparison: string, refValue: T) :AssertionReport {
+		const returnValue = {
+			assertionLevel: this.assertionLevel,
+			comparison:	`${actualValue} ${comparison} ${refValue}`
+		}
+		try {
+			assert[comparison](actualValue, refValue)
+			return {
+				...returnValue,
+				success: true
+			}
+		} catch(e) {
+			return {
+				...returnValue,
+				success: false
 			}
 		}
 	}

@@ -3,8 +3,7 @@ export enum RequestMethod {
 	POST = 'post',
 	DELETE = 'delete',
 	PUT = 'put',
-	OPTION = 'option',
-	ANY = 'any',
+	OPTIONS = 'options',
 }
 
 export type Request = {
@@ -21,9 +20,12 @@ export interface IFormation {
 	toString() :string
 	listKeys() :string[]
 }
+
+// TODO: maybe we can use generic instad of any type
 export type Response = {
 	code: StatusCode,
-	reply: object
+	reply: any,
+	headers: IFormation
 }
 
 export type RequestReport = {
@@ -34,11 +36,20 @@ export type RequestReport = {
 	response: Response
 	previous_request_id: string[]
 	next_request_id: string[]
+	assertion_reports: AssertionReport[]
 }
 
-export enum AssertionType {
+export enum AssertionLevel {
 	ERROR = 'error',
 	WARNING = 'warning',
+	LOG = 'log',
+	IGNORE = 'ignore',
+}
+
+export type AssertionReport = {
+	assertionLevel: AssertionLevel,
+	comparison: string,
+	success?: boolean,
 }
 
 export enum StatusCode {
@@ -51,5 +62,14 @@ export interface IAssertion {
 }
 
 export interface IRequestEngine {
-	request() :Promise<void>
+	request(req :Request) :Promise<Response>
+}
+
+export interface ICircularCheck {
+	check() :boolean
+}
+
+export interface ISequence {
+	getNext() :ISequence[]
+	getId() :string
 }
