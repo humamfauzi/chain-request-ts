@@ -1,0 +1,26 @@
+
+{
+  "compilerOptions": {
+      "allowSyntheticDefaultImports": true,
+      "lib": [
+          "dom",
+					"dom.iterable",
+          "es2015",
+          "scripthost"
+      ],
+      "module": "commonjs",
+      "noUnusedLocals": false,
+			"experimentalDecorators": true,
+      "outDir": "dist",
+      "strict": false,
+      "target": "es5",
+      "checkJs": false,
+			"downlevelIteration": true,
+      "keyofStringsOnly": false
+  },
+  "compileOnSave": true,
+  "exclude": [
+      "node_modules",
+      "packages"
+  ]
+}
